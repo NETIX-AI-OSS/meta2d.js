@@ -1986,6 +1986,83 @@ export class Meta2d {
     return parent;
   }
 
+  combineWithoutShowChild(pens: Pen[] = this.store.active) {
+    if (!pens || !pens.length) {
+      return;
+    }
+
+    const initPens = deepClone(pens);
+    if (pens.length === 1 && pens[0].type) {
+      pens[0].type = PenType.Node;
+      this.canvas.active(pens);
+      this.pushHistory({
+        type: EditType.Update,
+        initPens,
+        pens: deepClone(pens, true),
+      });
+      this.render();
+      return;
+    }
+
+    const rect = getRect(pens);
+    let parent: Pen = {
+      id: s8(),
+      name: 'combine',
+      ...rect,
+      children: [],
+      // showChild is removed to ensure all children are visible
+    };
+    this.canvas.makePen(parent);
+    const initParent = deepClone(parent);
+    let minIndex = Infinity;
+    pens.forEach((pen) => {
+      const index = this.store.data.pens.findIndex(
+        (_pen) => _pen.id === pen.id
+      );
+      if (index < minIndex) {
+        minIndex = index;
+      }
+      if (pen === parent || pen.parentId === parent.id) {
+        return;
+      }
+      parent.children.push(pen.id);
+      pen.parentId = parent.id;
+      const childRect = calcRelativeRect(pen.calculative.worldRect, rect);
+      Object.assign(pen, childRect);
+      pen.locked = pen.lockedOnCombine ?? LockState.DisableMove;
+      // Ensure children are visible
+      this.setVisible(pen, true, false);
+    });
+    this.store.data.pens.splice(minIndex, 0, parent);
+    this.store.data.pens.pop();
+    this.canvas.active([parent]);
+    this.pushHistory({
+      type: EditType.Add,
+      pens: [initParent],
+      step: 3,
+    });
+    this.pushHistory({
+      type: EditType.Update,
+      initPens: [initParent],
+      pens: [parent],
+      step: 3,
+    });
+    this.pushHistory({
+      type: EditType.Update,
+      initPens,
+      pens,
+      step: 3,
+    });
+    // Ensure all children are visible after combining
+    pens.forEach((pen) => {
+      calcInView(pen, true);
+      this.setVisible(pen, true, false); // Explicitly set visible true
+    });
+    this.initImageCanvas([parent]);
+    this.store.emitter.emit('combine', [parent]);
+    this.render();
+  }
+
   uncombine(pen?: Pen) {
     if (!pen && this.store.active) {
       pen = this.store.active[0];
